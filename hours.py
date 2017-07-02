@@ -2,6 +2,9 @@
 import cmd
 from datetime import datetime
 import sys
+import traceback
+
+from peewee import SelectQuery
 
 from models import Client, TimeCard
 from settings import DATABASE as db
@@ -13,20 +16,30 @@ HEADER = ('id#', 'CLIENT', 'DATE', 'START', 'END')
 TIMECARD = '{:^3}' + '{:^30}{:^15}{:^8}{:^8}'
 
 
-def print_headers():
+def print_timecards(data):
     print(TIMECARD.format(*HEADER))
+    if not isinstance(data, (list, SelectQuery)):
+        data = [data]
+    for timecard in data:
+        print(TIMECARD.format(
+            timecard.id,
+            timecard.client.name,
+            timecard.date.strftime('%Y/%m/%d'),
+            timecard.start.strftime('%H:%M'),
+            timecard.end.strftime('%H:%M')))
 
 
 class EditCmd(cmd.Cmd):
     prompt = '(edit)'
     timecard = None
 
-    def __init__(self, arg=None):
+    def __init__(self, pk=None, client_slug=None):
         super(EditCmd, self).__init__()
-        if arg:
-            self.timecard = TimeCard.select().where(TimeCard.id == arg).get()
-        else:
-            self.timecard = TimeCard()
+        if pk:
+            self.timecard = TimeCard.select().where(TimeCard.id == pk).get()
+        if client_slug:
+            client = Client.select().where(Client.slug == client_slug).get()
+            self.timecard = TimeCard(client=client)
 
     def do_start(self, arg):
         self.timecard.start = datetime.strptime(arg, TIME_FORMAT)
@@ -49,13 +62,20 @@ class EditCmd(cmd.Cmd):
         return True
 
     def do_print(self, arg):
-        print_headers()
-        print(TIMECARD.format(
-            self.timecard.id,
-            self.timecard.client.name,
-            self.timecard.date.strftime('%Y/%m/%d'),
-            self.timecard.start.strftime('%H:%M'),
-            self.timecard.end.strftime('%H:%M')))
+        try:
+            print_timecards(self.timecard)
+        except Exception:
+            traceback.print_exc()
+
+    def do_delete(self, arg):
+        delete = None
+        print('Deleting:')
+        self.do_print(arg)
+        delete = True if input('Are you sure?[y/n] ') == 'y' else False
+        if delete:
+            self.timecard.delete_instance()
+            print('Record deleted')
+            return True
 
     def do_return(self, arg):
         return True
@@ -70,30 +90,14 @@ class HourCmd(cmd.Cmd):
             db.create_tables([Client, TimeCard])
 
     def do_add(self, arg):
-        cmd = EditCmd()
+        cmd = EditCmd(client_slug=arg)
         cmd.cmdloop()
-        # date = input('Date? (YYYY/MM/DD) ')
-        # start = input('Start time? (HH:MM) ')
-        # end = input('End time? (HH:MM) ')
-        # client = Client.select().where(Client.slug == arg).get()
-        # date_string = '2017/07/01'
-        # date = datetime.strptime(date_string, DATE_FORMAT)
-
-        # start_string = '06:00'
-        # start = datetime.strptime(start_string, TIME_FORMAT)
-        # end_string = '07:00'
-        # end = datetime.strptime(end_string, TIME_FORMAT)
-        # TimeCard(
-        #     date=date.date(),
-        #     start=start.time(),
-        #     end=end.time(),
-        #     client=client).save()
 
     def do_date(self, arg):
         print(datetime.date.today())
 
     def do_edit(self, arg):
-        cmd = EditCmd(arg)
+        cmd = EditCmd(pk=arg)
         cmd.cmdloop()
 
     def do_list(self, arg):
@@ -102,15 +106,7 @@ class HourCmd(cmd.Cmd):
         if arg:
             tc_select = tc_select.join(Client).where(Client.slug == arg)
 
-        print_headers()
-        for timecard in tc_select:
-            print(TIMECARD.format(
-                timecard.id,
-                timecard.client.name,
-                timecard.date.strftime('%Y/%m/%d'),
-                timecard.start.strftime('%H:%M'),
-                timecard.end.strftime('%H:%M')))
-        print('end')
+        print_timecards(tc_select)
 
     def do_read(self, arg):
         print('read hours')
